@@ -1,0 +1,12 @@
+- name: get certificate
+  gather_facts: No
+  any_errors_fatal: true
+  hosts: _dev #_k3sServerSamu #tag name of server node we creted via terraform.
+    #become: true
+  vars:
+      ansible_become_method: doas
+  tasks:
+    - name: get secret
+      shell: kubectl get secret $(doas kubectl get secrets | awk '/default-token/ {print $1}') -o jsonpath="{['data']['ca\.crt']}" | base64 -d
+      register: ca_cert
+    - debug: msg='{{ ca_cert.stdout.strip() }}'

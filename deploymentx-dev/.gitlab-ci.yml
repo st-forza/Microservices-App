@@ -1,0 +1,46 @@
+default: 
+  image: "docker:19.03.13"
+  services: 
+    - "docker:19.03.13-dind"
+#image: atlassian/pipelines-kubectl:1.22.2    
+  
+variables:
+  DEPLOY: ${CI_PROJECT_DIR}/deployments
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+
+stages:
+  - kube-deploy
+
+kube_deploy_job:
+  image: 
+    name: atlassian/pipelines-kubectl:1.22.2
+    entrypoint:
+      - ""
+  stage: kube-deploy
+  before_script:
+    - echo $CI_PROJECT_PATH_SLUG
+    - cd ${DEPLOY}
+    #- apk add gettext
+    #- kubectl delete secret regcred || true
+    #- kubectl create secret docker-registry regcred --docker-server=$CI_REGISTRY --docker-username=${CON_REG_USER} --docker-password=${CON_REG_PASS}
+    #- kubectl get secret
+    #- echo -e "$(for i in $(ls); do cat $i; echo '\n---'; done )" | envsubst > ../dev/kustomized.yml 
+    #- cd ../dev
+    #- cat kustomized.yml
+    # - kubectl delete -f kustomized.yml
+  script: 
+    - echo "Wait for Docker daemon at tcp://localhost:2375"
+    - while ! nc -z localhost 2375; do sleep 0.1; done 
+  
+
+    - kubectl apply -f nginx.yml
+  environment:
+    name: dev
+  tags:
+    #- t3a.medium
+    - kube-runner
+  when: always
+  
+

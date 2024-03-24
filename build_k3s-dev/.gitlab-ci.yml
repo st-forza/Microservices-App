@@ -1,0 +1,197 @@
+image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+variables:
+  #Terraform folder for creating cluster...................
+  TF_ROOT: ${CI_PROJECT_DIR}/create_k3s_cluster_docs
+  ANSIBLE: ${CI_PROJECT_DIR}/ansible_docs
+  TF_ADDRESS: "https://gitlab.nioyatech.com/api/v4/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}"
+  #TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/projectx....................nbhht
+  UPSTREAM_PIPELINE_ID: $CI_PIPELINE_ID
+  GITLAB_TOKEN: ${gitlab_token}
+
+stages:
+  - plan-k3s
+  - apply-k3s
+  - get_k3s_certs
+  - triger-gitlab-integration
+  - terminate-k3s
+
+plan-k3s:
+  environment:
+    name: dev
+  when: manual
+  tags: 
+    - kube-runner
+    
+  stage: plan-k3s
+  before_script:
+    - cd ${TF_ROOT}
+  script:
+    #- echo "Wait for Docker daemon at tcp://localhost:2375"
+    #- while ! nc -z localhost 2375; do sleep 0.1; done 
+
+    - pwd
+    - ls
+    - terraform --version
+    - gitlab-terraform init
+    - gitlab-terraform plan
+    - gitlab-terraform plan-json
+  artifacts: # The terraform report obtains a Terraform tfplan.json file. The collected Terraform plan report uploads to GitLab as an artifact..
+    name: plan
+    paths:
+      - ${TF_ROOT}/plan.cache
+    reports:
+      terraform: ${TF_ROOT}/plan.json
+
+apply-k3s:
+  environment:
+    name: dev
+  when: manual
+  tags: 
+    - kube-runner
+    #- t3a.large
+  stage: apply-k3s
+  before_script:
+    - cd ${TF_ROOT}
+  script:
+    #- echo "Wait for Docker daemon at tcp://localhost:2375"
+    #- while ! nc -z localhost 2375; do sleep 0.1; done 
+  
+    - ls
+    - gitlab-terraform apply --auto-approve
+    # Create envirement variable (key pem file) for ansible
+    - PRIVATE_KEY=$(cat ./pem_key/a-a-a.pem | tr -d '\n' )
+    #- PUBLIC_KEY=$(cat ./pem_key/eg-prod-projectx.pub )
+    - echo "PRI_KEY=$PRIVATE_KEY" >> var.env
+    # Create envirement variable (public ip of server node) for ansible 
+    - public_ip=$(gitlab-terraform output masters_public_ip | cut -d"\"" -f2)
+    - echo "PUB_IP=$public_ip" >> var.env
+    - echo
+    - |
+      curl --request PUT "https://gitlab.nioyatech.com/api/v4/groups/470/variables/PUB_IP" \
+      --header "PRIVATE-TOKEN: $API_TOK" \
+      --form "value=${public_ip}"
+  artifacts: # The dotenv report collects a set of environment variables as artifacts. The collected variables are registered as runtime-created variables of the job, which you can use to set dynamic environment URLs after a job finishes.....
+    reports:
+      # To use environment variables with the other jobs.
+      dotenv: ./create_k3s_cluster_docs/var.env
+
+get_k3s_certs:
+  # ubuntu with ansible
+  image: clarusway/ansible
+  #image: redhat/ubi8:latest
+  stage: get_k3s_certs
+  #allow_failure: true
+  environment:
+    name: dev
+  when: manual
+  dependencies:
+    - apply-k3s
+  before_script:
+    #- lsb_release -a
+    - apt-get update -y
+    - apt upgrade -y
+    - apt-get install curl -y
+    #- apt install curl
+    #- cd ${TF_ROOT}
+    #- chmod 400 orlando.pem
+    - cd ${ANSIBLE}
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  script:
+    #- echo "Wait for Docker daemon at tcp://localhost:2375"
+    #- while ! nc -z localhost 2375; do sleep 0.1; done 
+  
+    - ansible-inventory -i k3s_aws_ec2.yml --graph
+    # to create pem file from PRI_KEY environment variable
+    - echo $PRI_KEY | sed -e "s/-----BEGIN RSA PRIVATE KEY-----/&\n/" -e "s/-----END RSA PRIVATE KEY-----/\n&/" -e "s/\S\{64\}/&\n/g" > key.pem
+    - chmod 400 key.pem
+    - cat key.pem
+    #- sed -i "s/grafana-pub-ip/$GRF_PUB_IP/g" grafana.yaml
+    #- sed -i "s/grafana-pr-ip/$GRF_PR_IP/g" get-token.yaml
+    # wait for creating cluster
+    - sleep 3m
+    #- ansible-playbook -b -u alpine -i k3s_aws_ec2.yml ping.yml --private-key=./key.pem
+    # get CA Certificate from server node.
+    - k3s_cert=$(ansible-playbook -b -u alpine -i k3s_aws_ec2.yml get-cert.yaml --private-key=./key.pem | grep "msg" | cut -d \" -f 4)
+    # get service token from server node
+    - k3s_token=$(ansible-playbook -b -u alpine -i k3s_aws_ec2.yml get-token.yaml --private-key=./key.pem | grep "msg" | cut -d \" -f 4)
+    # Create envirement variable  for k3s gitlab integration
+    - echo "K3S_CERT=${k3s_cert}"
+    - echo "K3S_CERT=${k3s_cert}" >> k3s.env
+    - echo "K3S_TOKEN=${k3s_token}"
+    - echo "K3S_TOKEN=${k3s_token}" >> k3s.env
+    - cat k3s.env
+    - |
+      curl --request PUT "https://gitlab.nioyatech.com/api/v4/groups/470/variables/K3S_CERT" \
+      --header "PRIVATE-TOKEN: $API_TOK" \
+      --form "value=${k3s_cert}"
+    - |
+      curl --request PUT "https://gitlab.nioyatech.com/api/v4/groups/470/variables/K3S_TOKEN" \
+      --header "PRIVATE-TOKEN: $API_TOK" \
+      --form "value=${k3s_token}"
+  artifacts:
+    reports:
+      dotenv: ${ANSIBLE}/k3s.env
+  needs:
+    - job: apply-k3s
+      artifacts: true
+  tags:
+    - kube-runner
+    #- t3a.large
+
+.save_variables:
+  environment:
+    name: dev
+  when: manual
+  tags: 
+    - kube-runner
+    #- t3a.large
+  stage: save_variables
+  before_script:
+    - cd ${TF_ROOT}
+  script:
+    - echo "K3S_TOKEN=${k3s_token}"
+    - echo "K3S_CERT=${k3s_cert}"
+    - |
+      curl --request PUT "https://gitlab.nioyatech.com/api/v4/groups/470/variables/K3S_CERT" \
+      --header "PRIVATE-TOKEN: $API_TOK" \
+      --form "value=${k3s_cert}"
+    - |
+      curl --request PUT "https://gitlab.nioyatech.com/api/v4/groups/470/variables/K3S_TOKEN" \
+      --header "PRIVATE-TOKEN: $API_TOK" \
+      --form "value=${k3s_token}"
+  dependencies:
+    - get_k3s_certs
+  needs:
+    - job: apply-k3s
+      artifacts: true
+    - get_k3s_certs
+      
+
+
+triger-gitlab-integration:
+  stage: triger-gitlab-integration
+  when: manual
+  trigger: 
+    project: k3s-clusterautomation-gitlabterraform/gitlab_k3s-integration 
+    branch: $CI_COMMIT_REF_NAME
+  only:
+    - dev
+
+
+   
+terminate-k3s:
+  environment:
+    name: dev
+  stage: terminate-k3s
+  before_script:
+    - cd ${TF_ROOT}
+  script:
+    - gitlab-terraform destroy
+  when: manual
+  tags: 
+    - kube-runner
+    #- t3a.large
+    #
+    
+

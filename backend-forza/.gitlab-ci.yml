@@ -1,0 +1,61 @@
+default: 
+  image: "docker:19.03.13"
+  services: 
+    - "docker:19.03.13-dind"
+
+stages:
+  - build-send-image-ecr
+  - triger-dev
+  
+variables:
+  AWS_REGION: "us-east-1"
+  DOCKER_REGISTRY: DOCKER_ID/IMAGE_NAME
+  IMAGE_NAME: todo-app #create a repository in the ECR with the same name
+  TAG_LATEST: :latest # don't forget to change "backend or frontend"
+  TAG_COMMIT: $CI_PIPELINE_IID # don't forget to change "backend or frontend".
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  BACKEND: ${CI_PROJECT_DIR}/backend-nodejs
+  DOCKER_ID: 302202314085.dkr.ecr.us-east-1.amazonaws.com
+  
+build-docker-image:
+  stage: build-send-image-ecr
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip3 install --no-cache-dir awscli
+    - apk add --update --no-cache curl jq
+    - apk update
+    - cd ${BACKEND}
+    #- apk add openjdk11
+   
+  script:
+    - echo "Wait for Docker daemon at tcp://localhost:2375"
+    - while ! nc -z localhost 2375; do sleep 0.1; done 
+
+    - aws ecr get-login-password  --region $AWS_REGION|
+      docker login --username AWS --password-stdin $DOCKER_ID
+    - DOCKER_BUILDKIT=0 docker build -t todo-app  .
+    - docker tag todo-app:latest 302202314085.dkr.ecr.us-east-1.amazonaws.com/todo-app:backend-$CI_PIPELINE_IID
+    - docker tag todo-app:latest 302202314085.dkr.ecr.us-east-1.amazonaws.com/todo-app:backend-latest 
+    - docker push 302202314085.dkr.ecr.us-east-1.amazonaws.com/todo-app:backend-$CI_PIPELINE_IID
+    - docker push 302202314085.dkr.ecr.us-east-1.amazonaws.com/todo-app:backend-latest
+    - |
+      curl --request PUT "https://gitlab.nioyatech.com/api/v4/groups/634/variables/TODO_APP_BACKEND_IMAGE" \
+      --header "PRIVATE-TOKEN: $API_TOK1" \
+      --form "value=$TAG_LATEST"
+  rules:
+    - if: $CI_COMMIT_REF_NAME == "king-simba"
+  tags:
+    #- t3a.medium
+    - kube-runner
+
+
+devops-triger-dev:
+  stage: triger-dev
+  trigger: 
+    project: challenge_x/DevOps_SubGroup/deploymentx # write appropiate group/repo name that you want to trigger
+    branch: $CI_COMMIT_REF_NAME
+  only: 
+    - king-simba
+

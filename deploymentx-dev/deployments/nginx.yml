@@ -1,0 +1,29 @@
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  labels:
+    app: nginx
+  name: nginx-deployment
+  namespace: deployments-251-dev     #for gitlab integration is a must
+  annotations:                                         
+    app.gitlab.com/app: k3s-clusterautomation-gitlabterraform-deployments #samuel-deployments  for gitlab integration is a must
+    app.gitlab.com/env: dev #dev# for gitlab integration is a must
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 2 # tells deployment to run 2 pods matching the template
+  template:
+    metadata:
+      annotations:
+        app.gitlab.com/app: k3s-clusterautomation-gitlabterraform-deployments #${CI_PROJECT_PATH_SLUG} #samuel-deployments#
+        app.gitlab.com/env: dev #dev 
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+

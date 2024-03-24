@@ -1,0 +1,107 @@
+image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+#image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+variables:
+  #Terraform folder for creating cluster..................
+  TF_ROOT: ${CI_PROJECT_DIR}/gitlab_k3s_integration_docs
+  TF_ADDRESS: "https://gitlab.nioyatech.com/api/v4/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}"
+  DOCKER_TLS_CERTDIR: ""
+  #DOCKER_HOST: tcp://docker:2375
+  #DOCKER_DRIVER: overlay2
+  GITLAB_TOKEN: ${gitlab_token}
+
+
+stages:
+  - kubernetes-gitlab-integration
+  - triger-deployments
+  - terminate-k3s
+
+kubernetes-gitlab-integration:
+  stage: kubernetes-gitlab-integration
+  #image: 
+    #name: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+    #entrypoint:
+     # - ""
+  environment:
+    name: dev
+  when: manual
+  before_script:
+  #- curl --request POST --form "token=$CI_JOB_TOKEN" --form ref=dev --form "variables[PATH]=$BUILD_PATH" "https://gitlab.nioyatech.com//api/v4/projects/249/trigger/pipeline"
+  #- apk add gzip
+  #- apk add xz
+  #- apk add zip
+  #- cd ${TF_ROOT}
+  - cd /builds/k3s-clusterautomation-gitlabterraform/gitlab_k3s-integration/gitlab_k3s_integration_docs
+  script:
+    #- echo "Wait for Docker daemon at tcp://localhost:2375"
+    #- while ! nc -z localhost 2375; do sleep 0.1; done 
+    #- 'curl --location --output env.zip --header "JOB-TOKEN: $CI_JOB_TOKEN" "https://gitlab.nioyatech.com/api/v4/projects/1/jobs/42676/artifacts/download?file_type=zip"'
+    #- 'curl --location --output env2.zip --header "JOB-TOKEN: $CI_JOB_TOKEN" "https://gitlab.nioyatech.com/api/v4/projects/1/jobs/42677/artifacts/download?file_type=zip"'
+
+    - pwd
+    - ls -al
+    #- zip -FF env.zip --out env.zip 
+    #- zip -FF env2.zip --out env.zip
+    #- unzip   env.zip
+    #- unzip  env2.zip
+    - ls -al
+    - echo $K3S_CERT >> cert-temp.txt
+    # configure ca certificate format and create cert.txt
+    - echo -e $(cat cert-temp.txt) > cert.txt
+    #create token.txt
+    - echo $K3S_TOKEN >> token.txt
+    # add public ip of server node to kube-gitlab.tf file
+    - echo $PUB_IP
+    - sed -i "s/publ_ip/$PUB_IP/g" kube-gitlab.tf 
+    #- gitlab-terraform  -chdir=${CI_PROJECT_DIR}/gitlab_k8s_integration_docs init
+    - gitlab-terraform init
+    - gitlab-terraform plan
+    - gitlab-terraform apply --auto-approve
+  #dependencies:
+    #- get_k3s_certs
+    #- apply-k3s
+  #needs:  
+    #- pipeline: $PARENT_PIPELINE_ID
+      #job: get_k3s_certs 
+      #ref: dev
+    #- pipeline: $PARENT_PIPELINE_ID
+      #job: apply-k3s
+      #ref: dev
+    #- project: k3s-clusterautomation-gitlabterraform/build_infrasture
+      #job: get_k3s_certs
+      #ref: dev
+      #artifacts: true
+    #- project: k3s-clusterautomation-gitlabterraform/build_infrasture
+      #job: apply-k3s
+      #ref: dev
+      #artifacts: true
+  
+      
+  tags:
+    - kube-runner
+    #- t3a.large
+
+
+triger-deployments:
+  stage: triger-deployments
+  when: manual
+  #rules:
+    #- if: $CI_COMMIT_REF_NAME == "dev"
+  trigger: 
+    project: k3s-clusterautomation-gitlabterraform/deployments
+    branch: $CI_COMMIT_REF_NAME
+  only:
+    - dev
+
+   
+terminate-k3s:
+  environment:
+    name: dev
+  stage: terminate-k3s
+  before_script:
+    - cd ${TF_ROOT}
+  script:
+    - gitlab-terraform destroy
+  when: manual
+  tags: 
+    - kube-runner
+    #- t3a.large

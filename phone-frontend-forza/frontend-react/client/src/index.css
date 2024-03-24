@@ -1,0 +1,35 @@
+.phonebook-container {
+    width: 80%;
+    margin: auto;
+    padding: 20px;
+}
+
+form {
+    margin-bottom: 30px;
+}
+
+label {
+    margin-right: 10px;
+}
+
+input[type="text"] {
+    margin-right: 10px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table, th, td {
+    border: 1px solid black;
+}
+
+th, td {
+    padding: 8px;
+    text-align: left;
+}
+
+button {
+    margin-right: 5px;
+}
